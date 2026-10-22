@@ -1,7 +1,10 @@
 import { tool } from "ai";
+import { sleep } from "workflow";
 import { z } from "zod";
+import { humanApprovalHook } from "@/workflows/hooks/human-approval";
 
 export const HIGH_VALUE_THRESHOLD_USD = 500;
+export const HUMAN_APPROVAL_TIMEOUT = "5m";
 
 export const requestRefund = tool({
   description:
@@ -46,7 +49,7 @@ export const executeHighValueAction = tool({
 
 export const askHumanApproval = tool({
   description:
-    "Pide aprobación humana antes de refunds, operaciones ≥ USD 500, o pedidos ambiguos.",
+    "Pide aprobación humana antes de refunds, operaciones ≥ USD 500, o pedidos ambiguos. Pausa el workflow hasta Approve/Deny (o timeout).",
   inputSchema: z.object({
     summary: z
       .string()
@@ -57,13 +60,56 @@ export const askHumanApproval = tool({
       .min(1)
       .describe("Por qué se necesita un humano (refund, alto valor, ambiguo)"),
   }),
-  execute: async ({ summary, reason }) => {
+  execute: async ({ summary, reason }, { toolCallId }) => {
+    // Hooks are workflow-level primitives — do not mark this execute with "use step".
+    using hook = humanApprovalHook.create({ token: toolCallId });
+
+    const decision = await Promise.race([
+      hook.then((payload) => ({
+        ...payload,
+        timedOut: false as const,
+      })),
+      sleep(HUMAN_APPROVAL_TIMEOUT).then(() => ({
+        approved: false as const,
+        timedOut: true as const,
+        comment: "Timeout de aprobación (5 minutos)",
+      })),
+    ]);
+
+    if (decision.timedOut) {
+      return {
+        status: "timed_out" as const,
+        summary,
+        reason,
+        approved: false,
+        comment: decision.comment,
+        message:
+          "La aprobación humana expiró tras 5 minutos. La operación no se ejecutó.",
+      };
+    }
+
+    if (!decision.approved) {
+      return {
+        status: "denied" as const,
+        summary,
+        reason,
+        approved: false,
+        comment: decision.comment ?? null,
+        message: decision.comment
+          ? `Aprobación denegada: ${decision.comment}`
+          : "Aprobación denegada por un humano.",
+      };
+    }
+
     return {
-      status: "not_implemented" as const,
+      status: "approved" as const,
       summary,
       reason,
-      message:
-        "HITL pendiente (Fase 2). Todavía no hay pausa durable ni aprobación en Slack.",
+      approved: true,
+      comment: decision.comment ?? null,
+      message: decision.comment
+        ? `Aprobado: ${decision.comment}`
+        : "Aprobado por un humano. Podés continuar con la operación.",
     };
   },
 });

@@ -1,9 +1,11 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
+import { WorkflowChatTransport } from "@ai-sdk/workflow/client";
 import type { UIMessage } from "ai";
 import { ArrowUpIcon, SquareIcon } from "lucide-react";
-import { useRef, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
+import { HumanApprovalCard } from "@/components/chat/human-approval-card";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import {
   InputGroup,
@@ -21,6 +23,8 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
 
+const ACTIVE_RUN_KEY = "active-workflow-run-id";
+
 function getMessageText(message: UIMessage) {
   return message.parts
     .filter((part) => part.type === "text")
@@ -28,30 +32,74 @@ function getMessageText(message: UIMessage) {
     .join("");
 }
 
-function getToolSummaries(message: UIMessage) {
-  return message.parts
-    .filter((part) => part.type.startsWith("tool-"))
-    .map((part) => {
-      const name = part.type.replace(/^tool-/, "");
-      const state =
-        "state" in part && typeof part.state === "string" ? part.state : "unknown";
-      return `${name} (${state})`;
-    });
+function hasPendingHumanApproval(messages: UIMessage[]) {
+  return messages.some((message) =>
+    message.parts.some((part) => {
+      if (part.type !== "tool-ask_human_approval") {
+        return false;
+      }
+      if (!("state" in part) || typeof part.state !== "string") {
+        return true;
+      }
+      return (
+        part.state !== "output-available" && part.state !== "output-error"
+      );
+    }),
+  );
 }
 
 export function ChatPanel() {
-  const { messages, sendMessage, status, stop, error } = useChat();
+  const activeRunId = useMemo(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+    return localStorage.getItem(ACTIVE_RUN_KEY) ?? undefined;
+  }, []);
+
+  const transport = useMemo(
+    () =>
+      new WorkflowChatTransport({
+        api: "/api/chat",
+        onChatSendMessage: (response) => {
+          const workflowRunId = response.headers.get("x-workflow-run-id");
+          if (workflowRunId) {
+            localStorage.setItem(ACTIVE_RUN_KEY, workflowRunId);
+          }
+        },
+        onChatEnd: () => {
+          localStorage.removeItem(ACTIVE_RUN_KEY);
+        },
+        prepareReconnectToStreamRequest: ({ api: _api, ...rest }) => {
+          const runId = localStorage.getItem(ACTIVE_RUN_KEY);
+          if (!runId) {
+            throw new Error("No active workflow run ID found");
+          }
+          return {
+            ...rest,
+            api: `/api/chat/${encodeURIComponent(runId)}/stream`,
+          };
+        },
+      }),
+    [],
+  );
+
+  const { messages, sendMessage, status, stop, error } = useChat({
+    transport,
+    resume: Boolean(activeRunId),
+  });
+
   const [text, setText] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const isBusy = status === "submitted" || status === "streaming";
-  const canSend = text.trim().length > 0 && !isBusy;
+  const pendingApproval = hasPendingHumanApproval(messages);
+  const canSend = text.trim().length > 0 && !isBusy && !pendingApproval;
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = text.trim();
-    if (!trimmed || isBusy) {
+    if (!trimmed || isBusy || pendingApproval) {
       return;
     }
 
@@ -68,8 +116,13 @@ export function ChatPanel() {
             Slack Approval Agent
           </h1>
           <p className="text-muted-foreground mt-0.5 text-sm leading-relaxed">
-            Refunds, alto valor y pedidos ambiguos. HITL en fases siguientes.
+            HITL en la UI (Approve/Deny). Slack llega en la Fase 3.
           </p>
+          {pendingApproval ? (
+            <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">
+              Pendiente de aprobación humana — el workflow está pausado.
+            </p>
+          ) : null}
         </header>
 
         <MessageScrollerProvider autoScroll>
@@ -82,8 +135,8 @@ export function ChatPanel() {
                       ¿En qué te ayudo?
                     </p>
                     <p className="max-w-sm leading-relaxed">
-                      Probá un refund, una compra ≥ USD 500 o algo ambiguo para
-                      ver las tools.
+                      Probá un refund o una compra ≥ USD 500 para disparar la
+                      aprobación humana.
                     </p>
                   </div>
                 ) : null}
@@ -91,7 +144,6 @@ export function ChatPanel() {
                 {messages.map((message) => {
                   const isUser = message.role === "user";
                   const content = getMessageText(message);
-                  const tools = getToolSummaries(message);
 
                   return (
                     <MessageScrollerItem
@@ -112,11 +164,62 @@ export function ChatPanel() {
                               </BubbleContent>
                             </Bubble>
                           ) : null}
-                          {tools.length > 0 ? (
-                            <p className="text-muted-foreground px-1 text-xs">
-                              Tools: {tools.join(" · ")}
-                            </p>
-                          ) : null}
+
+                          {message.parts.map((part, partIndex) => {
+                            if (part.type === "tool-ask_human_approval") {
+                              return (
+                                <HumanApprovalCard
+                                  key={`${message.id}-${partIndex}`}
+                                  toolCallId={part.toolCallId}
+                                  input={
+                                    "input" in part
+                                      ? (part.input as {
+                                          summary?: string;
+                                          reason?: string;
+                                        })
+                                      : undefined
+                                  }
+                                  output={
+                                    "output" in part
+                                      ? (part.output as {
+                                          status?: string;
+                                          message?: string;
+                                          approved?: boolean;
+                                          comment?: string | null;
+                                        })
+                                      : undefined
+                                  }
+                                  state={
+                                    "state" in part &&
+                                    typeof part.state === "string"
+                                      ? part.state
+                                      : undefined
+                                  }
+                                />
+                              );
+                            }
+
+                            if (
+                              part.type.startsWith("tool-") &&
+                              part.type !== "tool-ask_human_approval"
+                            ) {
+                              const name = part.type.replace(/^tool-/, "");
+                              const toolState =
+                                "state" in part && typeof part.state === "string"
+                                  ? part.state
+                                  : "unknown";
+                              return (
+                                <p
+                                  key={`${message.id}-${partIndex}`}
+                                  className="text-muted-foreground px-1 text-xs"
+                                >
+                                  Tool: {name} ({toolState})
+                                </p>
+                              );
+                            }
+
+                            return null;
+                          })}
                         </MessageContent>
                       </Message>
                     </MessageScrollerItem>
@@ -141,8 +244,13 @@ export function ChatPanel() {
                 autoFocus
                 value={text}
                 onChange={(event) => setText(event.target.value)}
-                placeholder="Escribí un mensaje…"
+                placeholder={
+                  pendingApproval
+                    ? "Resolvé la aprobación para continuar…"
+                    : "Escribí un mensaje…"
+                }
                 rows={1}
+                disabled={pendingApproval}
                 className="min-h-11 max-h-40 p-3 text-[15px]"
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
