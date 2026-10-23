@@ -12,11 +12,6 @@ export type VerifiedSlackInteraction =
 export async function verifyAndParseSlackInteraction(
   request: Request,
 ): Promise<VerifiedSlackInteraction> {
-  console.log("[slack/interactions] hit", {
-    contentType: request.headers.get("content-type"),
-    hasSignature: Boolean(request.headers.get("x-slack-signature")),
-    hasTimestamp: Boolean(request.headers.get("x-slack-request-timestamp")),
-  });
 
   const rawBody = await request.text();
   const { signingSecret } = getSlackConfig();
@@ -65,6 +60,5 @@ export async function verifyAndParseSlackInteraction(
   }
 
   const payload = JSON.parse(payloadRaw) as SlackInteractionPayload;
-  console.log("[slack/interactions] type=", payload.type);
   return { ok: true, payload };
 }

@@ -19,7 +19,7 @@ Plan de implementación.
 | 2 HITL durable | Hook + pause/resume + timeout           | Hecho (UI approve luego retirado) |
 | 3 Slack        | Bot + Block Kit + interactivity         | Hecho                             |
 | 4 Polish       | Demos README, mensaje Slack rico, build | Hecho                             |
-| Extra          | Guardrails anti prompt-injection        | Hecho                             |
+| Extra          | Guardrails, policy tipada, audit Slack  | Hecho                             |
 
 
 ---
@@ -134,17 +134,21 @@ Plan de implementación.
 
 
 
-## Extra — Guardrails
+## Extra — Guardrails + policy + audit
 
-**Objetivo:** reducir prompt injection y bypass de HITL.
+**Objetivo:** reducir prompt injection / bypass de HITL, parametrizar política, y dejar rastro append-only de decisiones.
 
 **Hecho**
 
-1. Instrucciones anti-injection (mensaje de usuario = dato no confiable)
-2. Límites Zod (monto ≤ USD 10 000, textos ≤ 500 chars)
-3. HITL **estructural**: `request_refund` siempre aprueba en Slack; `execute_high_value_action` si monto ≥ 500
+1. Instrucciones anti-injection (mensaje de usuario = dato no confiable) + alcance ops-only
+2. Límites / política tipada vía `POLICY_*` (`lib/policy/config`: umbral alto valor, max monto, timeout, refund always HITL)
+3. HITL **estructural**: `request_refund` siempre aprueba en Slack; `execute_high_value_action` si monto ≥ umbral
+4. **Audit trail** opcional a `SLACK_AUDIT_CHANNEL`: eventos `requested` / `resolved` / `executed` / `blocked` (también log local si no hay canal)
 
-**Commit:** `5971a70` — security guardrails + structural HITL
+**Commits**
+
+- `5971a70` — security guardrails + structural HITL
+- `848e926` — typed agent policy + Slack audit trail channel
 
 ---
 

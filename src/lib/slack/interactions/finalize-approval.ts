@@ -26,7 +26,6 @@ export function finalizeApproval(options: FinalizeApprovalInput) {
         actorName: options.actorName,
         source: "slack",
       });
-      console.log("[slack/interactions] hook resumed ok");
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to resume approval hook";
