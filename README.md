@@ -1,6 +1,6 @@
 # Slack Approval Agent
 
-Agent durable (Next.js + Workflow SDK + `WorkflowAgent`) con human-in-the-loop en la UI y en Slack.
+Agent durable (Next.js + Workflow SDK + `WorkflowAgent`) con human-in-the-loop **vía Slack** (Block Kit Approve / Deny).
 
 Challenge Plaude: chat en Next, aprobación humana para refunds / alto valor / pedidos ambiguos, entrega vía GitHub.
 
@@ -10,20 +10,24 @@ Challenge Plaude: chat en Next, aprobación humana para refunds / alto valor / p
 - Workflow SDK (`"use workflow"` / `"use step"`)
 - `WorkflowAgent` (`@ai-sdk/workflow`) — reemplazo de `DurableAgent`
 - Vercel AI Gateway (`AI_MODEL`, default `minimax/minimax-m3.1-flash`)
-- Slack App + Bot Token + Block Kit
+- Slack App + Bot Token + Block Kit + Interactivity HTTP
 
 ## Setup
 
 ```bash
 npm install
-cp .env.example .env.local
+cp .env.example .env
 ```
 
-Completá al menos:
+Completá:
 
 ```bash
 AI_GATEWAY_API_KEY=
 AI_MODEL=minimax/minimax-m3.1-flash
+
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_SIGNING_SECRET=...
+SLACK_APPROVAL_CHANNEL=C0123456789
 ```
 
 ```bash
@@ -32,59 +36,74 @@ npm run dev
 
 Abrí [http://localhost:3000](http://localhost:3000).
 
-Sin Slack configurado, la aprobación sigue funcionando **solo en la UI**.
+La demo pensada para el challenge **requiere Slack**.
 
-## Slack (Fase 3)
+## Slack
 
 ### 1. Crear la Slack App
 
-1. [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → From scratch
+1. [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → From scratch (Blank)
 2. **OAuth & Permissions** → Bot Token Scopes:
    - `chat:write`
    - `chat:write.public` (si posteás a canales sin invite)
 3. **Install to Workspace** → copiá `Bot User OAuth Token` → `SLACK_BOT_TOKEN`
-4. **Basic Information** → **Signing Secret** → `SLACK_SIGNING_SECRET`
+4. **Basic Information** → **Signing Secret** → `SLACK_SIGNING_SECRET` (no el Client Secret)
 5. Invitar el bot al canal de aprobaciones
-6. Copiá el **Channel ID** → `SLACK_APPROVAL_CHANNEL` (preferible ID `C…`)
+6. Copiá el **Channel ID** → `SLACK_APPROVAL_CHANNEL` (preferible `C…`)
 
 ### 2. Interactivity Request URL
 
-En la Slack App → **Interactivity & Shortcuts** → On:
+**Interactivity & Shortcuts** → On. **Socket Mode** → Off.
 
 ```text
 https://<tu-host-publico>/api/slack/interactions
 ```
 
-En local necesitás un tunnel (ngrok / Cloudflare Tunnel) o un deploy preview en Vercel.
+### 3. Qué hace el mensaje de Slack
 
-Ejemplo ngrok:
+1. Al escalar, se posta un Block Kit con **ID**, **Resumen**, **Motivo**, token y botones Approve / Deny
+2. Al clickear, el mismo mensaje se **reemplaza** (sin botones) con **ID**, **Decisión**, **Resumen**, **Motivo**
+3. El workflow resume el hook y el agent continúa en el chat
 
-```bash
-ngrok http 3000
-# Interactivity URL: https://xxxx.ngrok-free.app/api/slack/interactions
-```
-
-### 3. Env
-
-```bash
-SLACK_BOT_TOKEN=xoxb-...
-SLACK_SIGNING_SECRET=...
-SLACK_APPROVAL_CHANNEL=C0123456789
-```
-
-### Flujo
-
-1. El usuario pide un refund / acción ≥ USD 500 en el chat
-2. El agent llama `ask_human_approval` → el workflow **pausa**
-3. Se posta un mensaje Block Kit en el canal (Approve / Deny)
-4. Click en Slack (o en la UI) → `resumeHook` → el agent continúa
-5. Timeout demo: **5 minutos** → cancelación automática
+Timeout demo: **5 minutos** → la operación no se ejecuta.
 
 ## Demo script
 
-1. **Approve:** `Quiero un refund de USD 80 del pedido #123 por demora`
-2. **Deny:** mismo prompt → Deny en UI o Slack
-3. **Ambiguo:** `Haceme un reembolso` (sin monto / orderId)
+Con `npm run dev` + Interactivity URL pública + bot en el canal:
+
+### 1. Approve (refund)
+
+En el chat:
+
+```text
+Quiero un refund de USD 80 del pedido #33 por demora en la entrega
+```
+
+En Slack → **Approve**. En el canal el mensaje pasa a “Aprobado…”; en la UI el agent continúa y registra el refund mock.
+
+### 2. Deny
+
+```text
+Quiero un refund de USD 80 del pedido #33 por demora en la entrega
+```
+
+En Slack → **Deny**. El mensaje se actualiza a “Denegado…”; el agent no ejecuta el refund.
+
+### 3. Ambiguo
+
+```text
+Haceme un reembolso
+```
+
+El agent debería pedir datos faltantes y/o escalar a humano según las instrucciones.
+
+### 4. Alto valor (≥ USD 500)
+
+```text
+Quiero comprar un equipo de USD 750
+```
+
+Debería pedir aprobación humana antes de `execute_high_value_action`.
 
 ## Arquitectura breve
 
@@ -92,9 +111,12 @@ SLACK_APPROVAL_CHANNEL=C0123456789
 UI (useChat + WorkflowChatTransport)
   → POST /api/chat → start(chatWorkflow)
     → WorkflowAgent + tools
-      → ask_human_approval → hook + (opcional) Slack postMessage
-        → UI /api/hooks/approval  ó  Slack /api/slack/interactions
-          → resumeHook → agent continúa
+      → ask_human_approval
+          → hook (pausa durable)
+          → Slack chat.postMessage (Block Kit)
+        → Slack click → POST /api/slack/interactions
+            → ack replace_original (sin botones)
+            → resumeHook → agent continúa
 ```
 
 ## Nota sobre DurableAgent
