@@ -6,6 +6,7 @@ import type { UIMessage } from "ai";
 import { ArrowUpIcon, SquareIcon } from "lucide-react";
 import { useMemo, useRef, useState, type FormEvent } from "react";
 import { HumanApprovalCard } from "@/components/chat/human-approval-card";
+import { POLICY_DEFAULTS } from "@/lib/policy/config";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import {
   InputGroup,
@@ -53,7 +54,8 @@ function isPendingHitlPart(part: UIMessage["parts"][number]) {
     typeof part.input === "object" &&
     "amount" in part.input &&
     typeof (part.input as { amount?: unknown }).amount === "number" &&
-    (part.input as { amount: number }).amount < 500
+    (part.input as { amount: number }).amount <
+      POLICY_DEFAULTS.highValueThresholdUsd
   ) {
     return false;
   }
@@ -108,7 +110,7 @@ function hitlCardInput(part: UIMessage["parts"][number]): {
           ? `Operación de USD ${amount}${description ? `: ${description}` : ""}`
           : "Operación pendiente",
       reason:
-        amount != null && amount >= 500
+        amount != null && amount >= POLICY_DEFAULTS.highValueThresholdUsd
           ? "Alto valor — requiere Approve/Deny en Slack"
           : undefined,
     };

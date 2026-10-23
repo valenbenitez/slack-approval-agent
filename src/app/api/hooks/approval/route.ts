@@ -17,7 +17,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    await humanApprovalHook.resume(toolCallId, { approved, comment });
+    await humanApprovalHook.resume(toolCallId, {
+      approved,
+      comment,
+      source: "api",
+    });
     return Response.json({ success: true });
   } catch (error) {
     const message =

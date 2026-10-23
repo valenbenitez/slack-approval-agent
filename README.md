@@ -28,6 +28,13 @@ AI_MODEL=minimax/minimax-m3.1-flash
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_SIGNING_SECRET=...
 SLACK_APPROVAL_CHANNEL=C0123456789
+# Opcional: audit trail en otro canal
+SLACK_AUDIT_CHANNEL=C0AUDITXXXX
+
+# Policy tipada (ver src/lib/policy/config.ts)
+POLICY_REFUND_ALWAYS_REQUIRES_APPROVAL=true
+POLICY_HIGH_VALUE_THRESHOLD_USD=500
+POLICY_MAX_OPERATION_AMOUNT_USD=10000
 ```
 
 ```bash
@@ -50,6 +57,7 @@ La demo pensada para el challenge **requiere Slack**.
 4. **Basic Information** → **Signing Secret** → `SLACK_SIGNING_SECRET` (no el Client Secret)
 5. Invitar el bot al canal de aprobaciones
 6. Copiá el **Channel ID** → `SLACK_APPROVAL_CHANNEL` (preferible `C…`)
+7. (Opcional) Canal de auditoría → `SLACK_AUDIT_CHANNEL` (invitar el mismo bot)
 
 ### 2. Interactivity Request URL
 
@@ -119,7 +127,7 @@ UI (useChat + WorkflowChatTransport)
             → resumeHook → agent continúa
 ```
 
-Guardrails: instrucciones anti-injection, límites Zod (monto ≤ USD 10 000, textos acotados), y HITL **estructural** dentro de las tools sensibles.
+Guardrails: instrucciones anti-injection, límites de política tipada (`POLICY_*`), HITL **estructural** en tools sensibles, y **audit trail** opcional a `SLACK_AUDIT_CHANNEL` (requested / resolved / executed / blocked).
 
 ## Nota sobre DurableAgent
 

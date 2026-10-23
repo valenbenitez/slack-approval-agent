@@ -4,6 +4,8 @@ import { z } from "zod";
 export const humanApprovalPayloadSchema = z.object({
   approved: z.boolean(),
   comment: z.string().optional(),
+  actorName: z.string().optional(),
+  source: z.enum(["slack", "api"]).optional(),
 });
 
 export type HumanApprovalPayload = z.infer<typeof humanApprovalPayloadSchema>;

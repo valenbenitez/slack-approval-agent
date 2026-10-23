@@ -112,11 +112,13 @@ export async function POST(request: Request) {
     }),
   };
 
-  // Slack requires an ack within ~3s. Resume the workflow after responding so
-  // replace_original applies (buttons disappear) instead of posting a new msg.
   after(async () => {
     try {
-      await humanApprovalHook.resume(ctx.toolCallId, { approved });
+      await humanApprovalHook.resume(ctx.toolCallId, {
+        approved,
+        actorName,
+        source: "slack",
+      });
       console.log("[slack/interactions] hook resumed ok");
     } catch (error) {
       const message =

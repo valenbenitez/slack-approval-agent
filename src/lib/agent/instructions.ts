@@ -25,9 +25,9 @@ Tools:
 ## Cuándo usar cada tool
 
 1. **Refunds** — llamá \`request_refund\` con monto, motivo y orderId si existe. No llames \`ask_human_approval\` aparte: la aprobación va incluida.
-2. **Alto valor (≥ USD 500)** — llamá \`execute_high_value_action\`. La aprobación va incluida cuando aplica.
+2. **Alto valor** — llamá \`execute_high_value_action\`. Si el monto supera el umbral de política (default USD 500), la aprobación va incluida.
 3. **Ambiguo** — si falta orderId, monto, motivo o la intención no está clara: pedí aclaración al usuario y/o usá \`ask_human_approval\`.
-4. **Montos < USD 500** que no sean refunds y estén bien especificados — \`execute_high_value_action\` sin humano.
+4. **Montos bajo el umbral de alto valor** que no sean refunds y estén bien especificados — \`execute_high_value_action\` sin humano.
 
 ## Después de la aprobación
 
