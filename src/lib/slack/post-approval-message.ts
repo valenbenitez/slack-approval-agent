@@ -1,9 +1,14 @@
 import { getSlackConfig } from "@/lib/slack/env";
+import {
+  createApprovalId,
+  encodeApprovalButtonValue,
+} from "@/lib/slack/approval-context";
 
 export type SlackApprovalMessageResult = {
   ok: boolean;
   channel?: string;
   ts?: string;
+  approvalId?: string;
   skipped?: boolean;
   error?: string;
 };
@@ -20,6 +25,14 @@ export async function postSlackApprovalMessage(input: {
     return { ok: true, skipped: true };
   }
 
+  const approvalId = createApprovalId();
+  const buttonValue = encodeApprovalButtonValue({
+    toolCallId: input.toolCallId,
+    approvalId,
+    summary: input.summary,
+    reason: input.reason,
+  });
+
   const blocks = [
     {
       type: "header",
@@ -32,6 +45,14 @@ export async function postSlackApprovalMessage(input: {
     {
       type: "section",
       fields: [
+        {
+          type: "mrkdwn",
+          text: `*ID*\n\`${approvalId}\``,
+        },
+        {
+          type: "mrkdwn",
+          text: `*Estado*\nPendiente`,
+        },
         {
           type: "mrkdwn",
           text: `*Resumen*\n${input.summary}`,
@@ -60,14 +81,14 @@ export async function postSlackApprovalMessage(input: {
           text: { type: "plain_text", text: "Approve", emoji: true },
           style: "primary",
           action_id: "human_approval_approve",
-          value: input.toolCallId,
+          value: buttonValue,
         },
         {
           type: "button",
           text: { type: "plain_text", text: "Deny", emoji: true },
           style: "danger",
           action_id: "human_approval_deny",
-          value: input.toolCallId,
+          value: buttonValue,
         },
       ],
     },
@@ -81,7 +102,7 @@ export async function postSlackApprovalMessage(input: {
     },
     body: JSON.stringify({
       channel,
-      text: `Aprobación requerida: ${input.summary}`,
+      text: `Aprobación requerida (${approvalId}): ${input.summary}`,
       blocks,
     }),
   });
@@ -96,14 +117,72 @@ export async function postSlackApprovalMessage(input: {
   if (!data.ok) {
     return {
       ok: false,
+      approvalId,
       error: data.error ?? `Slack HTTP ${response.status}`,
     };
   }
 
   return {
     ok: true,
+    approvalId,
     channel: data.channel,
     ts: data.ts,
+  };
+}
+
+export function buildResolvedSlackBlocks(input: {
+  approved: boolean;
+  actorName?: string;
+  approvalId: string;
+  summary: string;
+  reason: string;
+  toolCallId: string;
+}) {
+  const decision = input.approved ? "✅ Aprobado" : "❌ Denegado";
+  const actor = input.actorName ? ` por ${input.actorName}` : "";
+
+  return {
+    text: `${decision}${actor} · ${input.approvalId}`,
+    blocks: [
+      {
+        type: "header",
+        text: {
+          type: "plain_text",
+          text: "Aprobación resuelta",
+          emoji: true,
+        },
+      },
+      {
+        type: "section",
+        fields: [
+          {
+            type: "mrkdwn",
+            text: `*ID*\n\`${input.approvalId}\``,
+          },
+          {
+            type: "mrkdwn",
+            text: `*Decisión*\n${decision}${actor}`,
+          },
+          {
+            type: "mrkdwn",
+            text: `*Resumen*\n${input.summary || "_Sin resumen_"}`,
+          },
+          {
+            type: "mrkdwn",
+            text: `*Motivo*\n${input.reason || "_Sin motivo_"}`,
+          },
+        ],
+      },
+      {
+        type: "context",
+        elements: [
+          {
+            type: "mrkdwn",
+            text: `Token: \`${input.toolCallId}\``,
+          },
+        ],
+      },
+    ],
   };
 }
 
@@ -112,16 +191,17 @@ export async function updateSlackApprovalMessage(input: {
   ts: string;
   approved: boolean;
   actorName?: string;
-  comment?: string;
+  approvalId: string;
+  summary: string;
+  reason: string;
+  toolCallId: string;
 }): Promise<void> {
   const { botToken } = getSlackConfig();
   if (!botToken) {
     return;
   }
 
-  const statusText = input.approved ? "✅ Aprobado" : "❌ Denegado";
-  const actor = input.actorName ? ` por ${input.actorName}` : "";
-  const comment = input.comment ? `\nComentario: ${input.comment}` : "";
+  const resolved = buildResolvedSlackBlocks(input);
 
   await fetch("https://slack.com/api/chat.update", {
     method: "POST",
@@ -132,16 +212,8 @@ export async function updateSlackApprovalMessage(input: {
     body: JSON.stringify({
       channel: input.channel,
       ts: input.ts,
-      text: `${statusText}${actor}${comment}`,
-      blocks: [
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `*${statusText}*${actor}${comment}`,
-          },
-        },
-      ],
+      text: resolved.text,
+      blocks: resolved.blocks,
     }),
   });
 }

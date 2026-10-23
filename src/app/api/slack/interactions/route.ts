@@ -1,4 +1,10 @@
+import { after } from "next/server";
+import { decodeApprovalButtonValue } from "@/lib/slack/approval-context";
 import { getSlackConfig } from "@/lib/slack/env";
+import {
+  buildResolvedSlackBlocks,
+  updateSlackApprovalMessage,
+} from "@/lib/slack/post-approval-message";
 import { verifySlackSignature } from "@/lib/slack/verify-signature";
 import { humanApprovalHook } from "@/workflows/hooks/human-approval";
 
@@ -15,31 +21,7 @@ type SlackBlockActionsPayload = {
   }>;
 };
 
-function buildResolvedMessage(options: {
-  approved: boolean;
-  actorName?: string;
-}) {
-  const statusText = options.approved ? "✅ Aprobado" : "❌ Denegado";
-  const actor = options.actorName ? ` por ${options.actorName}` : "";
-  const text = `${statusText}${actor}`;
-
-  return {
-    replace_original: true,
-    text,
-    blocks: [
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `*${statusText}*${actor}`,
-        },
-      },
-    ],
-  };
-}
-
 export async function POST(request: Request) {
-  // Log immediately so a miss (no log at all) means Slack never hit this process.
   console.log("[slack/interactions] hit", {
     contentType: request.headers.get("content-type"),
     hasSignature: Boolean(request.headers.get("x-slack-signature")),
@@ -89,10 +71,10 @@ export async function POST(request: Request) {
   }
 
   const action = payload.actions?.[0];
-  const toolCallId = action?.value;
   const actionId = action?.action_id;
+  const ctx = decodeApprovalButtonValue(action?.value);
 
-  if (!toolCallId || !actionId) {
+  if (!ctx || !actionId) {
     console.error("[slack/interactions] missing action data", action);
     return new Response("Missing action data", { status: 400 });
   }
@@ -111,31 +93,56 @@ export async function POST(request: Request) {
     payload.user?.username ||
     payload.user?.id;
 
-  console.log("[slack/interactions] resume", { toolCallId, approved, actorName });
+  console.log("[slack/interactions] resume scheduled", {
+    toolCallId: ctx.toolCallId,
+    approvalId: ctx.approvalId,
+    approved,
+    actorName,
+  });
 
-  try {
-    await humanApprovalHook.resume(toolCallId, { approved });
-    console.log("[slack/interactions] hook resumed ok");
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to resume approval hook";
-    // Still continue so Slack UI updates; hook may already be resolved.
-    console.error("[slack/interactions] resume failed:", message);
-  }
+  const resolvedBody = {
+    replace_original: true,
+    ...buildResolvedSlackBlocks({
+      approved,
+      actorName,
+      approvalId: ctx.approvalId,
+      summary: ctx.summary,
+      reason: ctx.reason,
+      toolCallId: ctx.toolCallId,
+    }),
+  };
 
-  const resolved = buildResolvedMessage({ approved, actorName });
+  // Slack requires an ack within ~3s. Resume the workflow after responding so
+  // replace_original applies (buttons disappear) instead of posting a new msg.
+  after(async () => {
+    try {
+      await humanApprovalHook.resume(ctx.toolCallId, { approved });
+      console.log("[slack/interactions] hook resumed ok");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to resume approval hook";
+      console.error("[slack/interactions] resume failed:", message);
+    }
 
-  // Prefer acknowledging with replace_original so buttons disappear immediately.
-  // Also hit response_url as a fallback for older clients.
-  if (payload.response_url) {
-    void fetch(payload.response_url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json; charset=utf-8" },
-      body: JSON.stringify(resolved),
-    }).catch((error) => {
-      console.error("[slack/interactions] response_url failed", error);
-    });
-  }
+    const channelId = payload.channel?.id ?? payload.container?.channel_id;
+    const messageTs = payload.message?.ts ?? payload.container?.message_ts;
+    if (channelId && messageTs) {
+      try {
+        await updateSlackApprovalMessage({
+          channel: channelId,
+          ts: messageTs,
+          approved,
+          actorName,
+          approvalId: ctx.approvalId,
+          summary: ctx.summary,
+          reason: ctx.reason,
+          toolCallId: ctx.toolCallId,
+        });
+      } catch (error) {
+        console.error("[slack/interactions] chat.update failed", error);
+      }
+    }
+  });
 
-  return Response.json(resolved);
+  return Response.json(resolvedBody);
 }
