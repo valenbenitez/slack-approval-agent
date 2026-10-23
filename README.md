@@ -53,6 +53,7 @@ La demo pensada para el challenge **requiere Slack**.
 2. **OAuth & Permissions** → Bot Token Scopes:
    - `chat:write`
    - `chat:write.public` (si posteás a canales sin invite)
+   - Reinstalá la app tras agregar scopes si ya estaba instalada
 3. **Install to Workspace** → copiá `Bot User OAuth Token` → `SLACK_BOT_TOKEN`
 4. **Basic Information** → **Signing Secret** → `SLACK_SIGNING_SECRET` (no el Client Secret)
 5. Invitar el bot al canal de aprobaciones

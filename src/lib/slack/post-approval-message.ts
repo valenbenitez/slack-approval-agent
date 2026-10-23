@@ -137,9 +137,11 @@ export function buildResolvedSlackBlocks(input: {
   summary: string;
   reason: string;
   toolCallId: string;
+  comment?: string | null;
 }) {
   const decision = input.approved ? "✅ Aprobado" : "❌ Denegado";
   const actor = input.actorName ? ` por ${input.actorName}` : "";
+  const comment = input.comment?.trim();
 
   return {
     text: `${decision}${actor} · ${input.approvalId}`,
@@ -173,6 +175,17 @@ export function buildResolvedSlackBlocks(input: {
           },
         ],
       },
+      ...(comment
+        ? [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `*Comentario*\n${comment}`,
+              },
+            },
+          ]
+        : []),
       {
         type: "context",
         elements: [
@@ -195,6 +208,7 @@ export async function updateSlackApprovalMessage(input: {
   summary: string;
   reason: string;
   toolCallId: string;
+  comment?: string | null;
 }): Promise<void> {
   const { botToken } = getSlackConfig();
   if (!botToken) {

@@ -6,6 +6,7 @@ import type { UIMessage } from "ai";
 import { ArrowUpIcon, SquareIcon } from "lucide-react";
 import { useMemo, useRef, useState, type FormEvent } from "react";
 import { HumanApprovalCard } from "@/components/chat/human-approval-card";
+import { MessageMarkdown } from "@/components/chat/message-markdown";
 import { POLICY_DEFAULTS } from "@/lib/policy/config";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import {
@@ -230,8 +231,12 @@ export function ChatPanel() {
                               variant={isUser ? "muted" : "secondary"}
                               className="max-w-[85%]"
                             >
-                              <BubbleContent className="whitespace-pre-wrap text-[15px] leading-relaxed">
-                                {content}
+                              <BubbleContent className="text-[15px] leading-relaxed">
+                                {isUser ? (
+                                  <p className="whitespace-pre-wrap">{content}</p>
+                                ) : (
+                                  <MessageMarkdown content={content} />
+                                )}
                               </BubbleContent>
                             </Bubble>
                           ) : null}
