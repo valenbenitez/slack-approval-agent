@@ -111,13 +111,15 @@ Debería pedir aprobación humana antes de `execute_high_value_action`.
 UI (useChat + WorkflowChatTransport)
   → POST /api/chat → start(chatWorkflow)
     → WorkflowAgent + tools
-      → ask_human_approval
-          → hook (pausa durable)
+      → request_refund / execute_high_value (≥500) / ask_human_approval
+          → hook HITL (pausa durable; no se puede saltear por prompt)
           → Slack chat.postMessage (Block Kit)
         → Slack click → POST /api/slack/interactions
             → ack replace_original (sin botones)
             → resumeHook → agent continúa
 ```
+
+Guardrails: instrucciones anti-injection, límites Zod (monto ≤ USD 10 000, textos acotados), y HITL **estructural** dentro de las tools sensibles.
 
 ## Nota sobre DurableAgent
 

@@ -20,24 +20,31 @@ type HumanApprovalCardProps = {
 
 function ResolvedCard({ output }: { output: ApprovalOutput }) {
   const status = output.status ?? "done";
-  const tone =
-    status === "approved"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-50"
-      : status === "timed_out"
-        ? "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-50"
-        : "border-rose-200 bg-rose-50 text-rose-950 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-50";
+  const isSuccess =
+    status === "approved" ||
+    status === "mock_submitted" ||
+    status === "mock_executed";
+  const isTimeout = status === "timed_out";
+
+  const tone = isSuccess
+    ? "border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-50"
+    : isTimeout
+      ? "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-50"
+      : "border-rose-200 bg-rose-50 text-rose-950 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-50";
+
+  const title = isSuccess
+    ? status === "mock_submitted" || status === "mock_executed"
+      ? "Completado"
+      : "Aprobado"
+    : isTimeout
+      ? "Expiró (timeout)"
+      : "Denegado";
 
   return (
     <div className={`w-full max-w-[85%] rounded-2xl border px-4 py-3 text-sm ${tone}`}>
-      <p className="font-medium">
-        {status === "approved"
-          ? "Aprobado"
-          : status === "timed_out"
-            ? "Expiró (timeout)"
-            : "Denegado"}
-      </p>
+      <p className="font-medium">{title}</p>
       <p className="mt-1 leading-relaxed opacity-90">
-        {output.message ?? "La aprobación humana ya se resolvió."}
+        {output.message ?? "La operación ya se resolvió."}
       </p>
     </div>
   );
@@ -54,7 +61,7 @@ export function HumanApprovalCard({
         output={
           output ?? {
             status: "done",
-            message: "La aprobación humana ya se resolvió.",
+            message: "La operación ya se resolvió.",
           }
         }
       />

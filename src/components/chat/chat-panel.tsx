@@ -32,23 +32,89 @@ function getMessageText(message: UIMessage) {
     .join("");
 }
 
+const HITL_TOOL_TYPES = new Set([
+  "tool-ask_human_approval",
+  "tool-request_refund",
+  "tool-execute_high_value_action",
+]);
+
+function isPendingHitlPart(part: UIMessage["parts"][number]) {
+  if (!HITL_TOOL_TYPES.has(part.type)) {
+    return false;
+  }
+  if ("output" in part && part.output != null) {
+    return false;
+  }
+  // Low-value actions do not wait on Slack.
+  if (
+    part.type === "tool-execute_high_value_action" &&
+    "input" in part &&
+    part.input &&
+    typeof part.input === "object" &&
+    "amount" in part.input &&
+    typeof (part.input as { amount?: unknown }).amount === "number" &&
+    (part.input as { amount: number }).amount < 500
+  ) {
+    return false;
+  }
+  if (!("state" in part) || typeof part.state !== "string") {
+    return true;
+  }
+  return part.state !== "output-available" && part.state !== "output-error";
+}
+
 function hasPendingHumanApproval(messages: UIMessage[]) {
-  return messages.some((message) =>
-    message.parts.some((part) => {
-      if (part.type !== "tool-ask_human_approval") {
-        return false;
-      }
-      if ("output" in part && part.output != null) {
-        return false;
-      }
-      if (!("state" in part) || typeof part.state !== "string") {
-        return true;
-      }
-      return (
-        part.state !== "output-available" && part.state !== "output-error"
-      );
-    }),
-  );
+  return messages.some((message) => message.parts.some(isPendingHitlPart));
+}
+
+function hitlCardInput(part: UIMessage["parts"][number]): {
+  summary?: string;
+  reason?: string;
+} {
+  if (!("input" in part) || part.input == null || typeof part.input !== "object") {
+    return {};
+  }
+  const input = part.input as Record<string, unknown>;
+
+  if (part.type === "tool-ask_human_approval") {
+    return {
+      summary: typeof input.summary === "string" ? input.summary : undefined,
+      reason: typeof input.reason === "string" ? input.reason : undefined,
+    };
+  }
+
+  if (part.type === "tool-request_refund") {
+    const amount = typeof input.amount === "number" ? input.amount : null;
+    const orderId = typeof input.orderId === "string" ? input.orderId : null;
+    const reason = typeof input.reason === "string" ? input.reason : undefined;
+    return {
+      summary:
+        amount != null
+          ? orderId
+            ? `Refund de USD ${amount} · pedido ${orderId}`
+            : `Refund de USD ${amount}`
+          : "Refund pendiente",
+      reason,
+    };
+  }
+
+  if (part.type === "tool-execute_high_value_action") {
+    const amount = typeof input.amount === "number" ? input.amount : null;
+    const description =
+      typeof input.description === "string" ? input.description : undefined;
+    return {
+      summary:
+        amount != null
+          ? `Operación de USD ${amount}${description ? `: ${description}` : ""}`
+          : "Operación pendiente",
+      reason:
+        amount != null && amount >= 500
+          ? "Alto valor — requiere Approve/Deny en Slack"
+          : undefined,
+    };
+  }
+
+  return {};
 }
 
 export function ChatPanel() {
@@ -169,28 +235,44 @@ export function ChatPanel() {
                           ) : null}
 
                           {message.parts.map((part, partIndex) => {
-                            if (part.type === "tool-ask_human_approval") {
+                            if (HITL_TOOL_TYPES.has(part.type)) {
+                              const toolCallId =
+                                "toolCallId" in part
+                                  ? String(part.toolCallId)
+                                  : `${message.id}-${partIndex}`;
+                              const output =
+                                "output" in part
+                                  ? (part.output as {
+                                      status?: string;
+                                      message?: string;
+                                      approved?: boolean;
+                                      comment?: string | null;
+                                    })
+                                  : undefined;
+
+                              // Low-value execute_high_value finishes without Slack —
+                              // keep a compact tool line instead of the HITL card.
+                              if (
+                                part.type === "tool-execute_high_value_action" &&
+                                output &&
+                                output.status === "mock_executed" &&
+                                !output.approved
+                              ) {
+                                return (
+                                  <p
+                                    key={toolCallId}
+                                    className="text-muted-foreground px-1 text-xs"
+                                  >
+                                    Tool: execute_high_value_action (ok)
+                                  </p>
+                                );
+                              }
+
                               return (
                                 <HumanApprovalCard
-                                  key={part.toolCallId}
-                                  input={
-                                    "input" in part
-                                      ? (part.input as {
-                                          summary?: string;
-                                          reason?: string;
-                                        })
-                                      : undefined
-                                  }
-                                  output={
-                                    "output" in part
-                                      ? (part.output as {
-                                          status?: string;
-                                          message?: string;
-                                          approved?: boolean;
-                                          comment?: string | null;
-                                        })
-                                      : undefined
-                                  }
+                                  key={toolCallId}
+                                  input={hitlCardInput(part)}
+                                  output={output}
                                   state={
                                     "state" in part &&
                                     typeof part.state === "string"
@@ -201,10 +283,7 @@ export function ChatPanel() {
                               );
                             }
 
-                            if (
-                              part.type.startsWith("tool-") &&
-                              part.type !== "tool-ask_human_approval"
-                            ) {
+                            if (part.type.startsWith("tool-")) {
                               const name = part.type.replace(/^tool-/, "");
                               const toolState =
                                 "state" in part && typeof part.state === "string"
