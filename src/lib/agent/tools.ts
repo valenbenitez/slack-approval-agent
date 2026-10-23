@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { sleep } from "workflow";
 import { z } from "zod";
+import { postSlackApprovalMessage } from "@/lib/slack/post-approval-message";
 import { humanApprovalHook } from "@/workflows/hooks/human-approval";
 
 export const HIGH_VALUE_THRESHOLD_USD = 500;
@@ -64,6 +65,13 @@ export const askHumanApproval = tool({
     // Hooks are workflow-level primitives — do not mark this execute with "use step".
     using hook = humanApprovalHook.create({ token: toolCallId });
 
+    // Side effect (Slack API) runs as a durable step; UI approval still works without Slack.
+    const slackPost = await postSlackApprovalMessage({
+      toolCallId,
+      summary,
+      reason,
+    });
+
     const decision = await Promise.race([
       hook.then((payload) => ({
         ...payload,
@@ -83,6 +91,7 @@ export const askHumanApproval = tool({
         reason,
         approved: false,
         comment: decision.comment,
+        slackPosted: Boolean(slackPost.ok && !slackPost.skipped),
         message:
           "La aprobación humana expiró tras 5 minutos. La operación no se ejecutó.",
       };
@@ -95,6 +104,7 @@ export const askHumanApproval = tool({
         reason,
         approved: false,
         comment: decision.comment ?? null,
+        slackPosted: Boolean(slackPost.ok && !slackPost.skipped),
         message: decision.comment
           ? `Aprobación denegada: ${decision.comment}`
           : "Aprobación denegada por un humano.",
@@ -107,6 +117,7 @@ export const askHumanApproval = tool({
       reason,
       approved: true,
       comment: decision.comment ?? null,
+      slackPosted: Boolean(slackPost.ok && !slackPost.skipped),
       message: decision.comment
         ? `Aprobado: ${decision.comment}`
         : "Aprobado por un humano. Podés continuar con la operación.",

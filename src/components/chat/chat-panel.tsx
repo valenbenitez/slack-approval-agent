@@ -38,6 +38,9 @@ function hasPendingHumanApproval(messages: UIMessage[]) {
       if (part.type !== "tool-ask_human_approval") {
         return false;
       }
+      if ("output" in part && part.output != null) {
+        return false;
+      }
       if (!("state" in part) || typeof part.state !== "string") {
         return true;
       }
@@ -116,11 +119,11 @@ export function ChatPanel() {
             Slack Approval Agent
           </h1>
           <p className="text-muted-foreground mt-0.5 text-sm leading-relaxed">
-            HITL en la UI (Approve/Deny). Slack llega en la Fase 3.
+            HITL vía Slack (Approve/Deny). Timeout demo: 5 min.
           </p>
           {pendingApproval ? (
             <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">
-              Pendiente de aprobación humana — el workflow está pausado.
+              Pendiente en Slack — el workflow está pausado.
             </p>
           ) : null}
         </header>
@@ -169,8 +172,7 @@ export function ChatPanel() {
                             if (part.type === "tool-ask_human_approval") {
                               return (
                                 <HumanApprovalCard
-                                  key={`${message.id}-${partIndex}`}
-                                  toolCallId={part.toolCallId}
+                                  key={part.toolCallId}
                                   input={
                                     "input" in part
                                       ? (part.input as {
@@ -246,7 +248,7 @@ export function ChatPanel() {
                 onChange={(event) => setText(event.target.value)}
                 placeholder={
                   pendingApproval
-                    ? "Resolvé la aprobación para continuar…"
+                    ? "Aprobá o denegá en Slack para continuar…"
                     : "Escribí un mensaje…"
                 }
                 rows={1}

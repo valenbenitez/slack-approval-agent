@@ -1,36 +1,102 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Slack Approval Agent
 
-## Getting Started
+Agent durable (Next.js + Workflow SDK + `WorkflowAgent`) con human-in-the-loop en la UI y en Slack.
 
-First, run the development server:
+Challenge Plaude: chat en Next, aprobación humana para refunds / alto valor / pedidos ambiguos, entrega vía GitHub.
+
+## Stack
+
+- Next.js App Router
+- Workflow SDK (`"use workflow"` / `"use step"`)
+- `WorkflowAgent` (`@ai-sdk/workflow`) — reemplazo de `DurableAgent`
+- Vercel AI Gateway (`AI_MODEL`, default `minimax/minimax-m3.1-flash`)
+- Slack App + Bot Token + Block Kit
+
+## Setup
+
+```bash
+npm install
+cp .env.example .env.local
+```
+
+Completá al menos:
+
+```bash
+AI_GATEWAY_API_KEY=
+AI_MODEL=minimax/minimax-m3.1-flash
+```
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Abrí [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Sin Slack configurado, la aprobación sigue funcionando **solo en la UI**.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Slack (Fase 3)
 
-## Learn More
+### 1. Crear la Slack App
 
-To learn more about Next.js, take a look at the following resources:
+1. [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → From scratch
+2. **OAuth & Permissions** → Bot Token Scopes:
+   - `chat:write`
+   - `chat:write.public` (si posteás a canales sin invite)
+3. **Install to Workspace** → copiá `Bot User OAuth Token` → `SLACK_BOT_TOKEN`
+4. **Basic Information** → **Signing Secret** → `SLACK_SIGNING_SECRET`
+5. Invitar el bot al canal de aprobaciones
+6. Copiá el **Channel ID** → `SLACK_APPROVAL_CHANNEL` (preferible ID `C…`)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 2. Interactivity Request URL
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+En la Slack App → **Interactivity & Shortcuts** → On:
 
-## Deploy on Vercel
+```text
+https://<tu-host-publico>/api/slack/interactions
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+En local necesitás un tunnel (ngrok / Cloudflare Tunnel) o un deploy preview en Vercel.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Ejemplo ngrok:
+
+```bash
+ngrok http 3000
+# Interactivity URL: https://xxxx.ngrok-free.app/api/slack/interactions
+```
+
+### 3. Env
+
+```bash
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_SIGNING_SECRET=...
+SLACK_APPROVAL_CHANNEL=C0123456789
+```
+
+### Flujo
+
+1. El usuario pide un refund / acción ≥ USD 500 en el chat
+2. El agent llama `ask_human_approval` → el workflow **pausa**
+3. Se posta un mensaje Block Kit en el canal (Approve / Deny)
+4. Click en Slack (o en la UI) → `resumeHook` → el agent continúa
+5. Timeout demo: **5 minutos** → cancelación automática
+
+## Demo script
+
+1. **Approve:** `Quiero un refund de USD 80 del pedido #123 por demora`
+2. **Deny:** mismo prompt → Deny en UI o Slack
+3. **Ambiguo:** `Haceme un reembolso` (sin monto / orderId)
+
+## Arquitectura breve
+
+```text
+UI (useChat + WorkflowChatTransport)
+  → POST /api/chat → start(chatWorkflow)
+    → WorkflowAgent + tools
+      → ask_human_approval → hook + (opcional) Slack postMessage
+        → UI /api/hooks/approval  ó  Slack /api/slack/interactions
+          → resumeHook → agent continúa
+```
+
+## Nota sobre DurableAgent
+
+El enunciado del challenge menciona `DurableAgent`. Usamos **`WorkflowAgent`** de `@ai-sdk/workflow`, el reemplazo oficial en AI SDK 7.
