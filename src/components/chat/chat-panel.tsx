@@ -187,9 +187,6 @@ export function ChatPanel() {
           <h1 className="text-[17px] font-semibold tracking-tight">
             Slack Approval Agent
           </h1>
-          <p className="text-muted-foreground mt-0.5 text-sm leading-relaxed">
-            HITL vía Slack (Approve/Deny). Timeout demo: 5 min.
-          </p>
           {pendingApproval ? (
             <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">
               Pendiente en Slack — el workflow está pausado.

@@ -73,7 +73,7 @@ export function HumanApprovalCard({
       <div>
         <p className="text-sm font-medium">Pendiente de aprobación en Slack</p>
         <p className="text-muted-foreground mt-1 text-xs">
-          Usá Approve / Deny en el mensaje de Slack. Timeout demo: 5 min.
+          Tiempo de espera: 5 minutos.
         </p>
       </div>
 
